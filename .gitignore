@@ -1,0 +1,15 @@
+.DS_Store
+
+# Xcode user state
+**/xcuserdata/
+*.xcuserstate
+
+# Python
+server/.env
+server/.venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
