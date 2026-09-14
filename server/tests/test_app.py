@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from starlette.websockets import WebSocketDisconnect
 
 from app.db import Base, get_db
 from app.main import app
@@ -88,6 +89,22 @@ def test_root(client: TestClient) -> None:
     assert response.status_code == 200
     assert response.json()["docs"] == "/docs"
     assert response.json()["health"] == "/health"
+
+
+def test_private_routes_require_bearer_credentials(client: TestClient) -> None:
+    missing = client.get("/devices")
+    invalid = client.get(
+        "/devices", headers={"Authorization": "Bearer not-a-valid-token"}
+    )
+
+    assert missing.status_code == 401
+    assert missing.headers["www-authenticate"] == "Bearer"
+    assert invalid.status_code == 401
+
+    with pytest.raises(WebSocketDisconnect) as disconnect:
+        with client.websocket_connect("/ws"):
+            pass
+    assert disconnect.value.code == 4401
 
 
 def test_auth_devices_sessions_and_websocket(client: TestClient) -> None:

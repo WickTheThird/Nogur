@@ -1,0 +1,18 @@
+[Unit]
+Description=Deploy Nogur server changes from GitHub
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=nogur
+Group=nogur
+SupplementaryGroups=docker
+Environment=HOME=/home/nogur
+UMask=0077
+ExecStart=/usr/local/sbin/nogur-pull-deploy
+Nice=10
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,98 @@
+services:
+  api:
+    build:
+      context: .
+    restart: unless-stopped
+    environment:
+      NOGUR_APP_ENV: production
+      NOGUR_DEBUG: "false"
+      NOGUR_DATABASE_URL: ${NOGUR_DATABASE_URL:?Set NOGUR_DATABASE_URL in .env.production}
+      NOGUR_REDIS_URL: redis://redis:6379/0
+      NOGUR_JWT_SECRET: ${NOGUR_JWT_SECRET:?Set NOGUR_JWT_SECRET in .env.production}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - uv
+        - run
+        - --no-sync
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - edge
+      - backend
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?Set CLOUDFLARE_TUNNEL_TOKEN in .env.production}
+    networks:
+      - edge
+
+  migrate:
+    build:
+      context: .
+    command: ["uv", "run", "--no-sync", "alembic", "upgrade", "head"]
+    environment:
+      NOGUR_APP_ENV: production
+      NOGUR_DATABASE_URL: ${NOGUR_DATABASE_URL:?Set NOGUR_DATABASE_URL in .env.production}
+      NOGUR_REDIS_URL: redis://redis:6379/0
+      NOGUR_JWT_SECRET: ${NOGUR_JWT_SECRET:?Set NOGUR_JWT_SECRET in .env.production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nogur}
+      POSTGRES_USER: ${POSTGRES_USER:-nogur}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - backend
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - backend
+
+networks:
+  edge:
+  backend:
+    internal: true
+
+volumes:
+  postgres_data:
+  redis_data:

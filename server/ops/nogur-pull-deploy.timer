@@ -1,0 +1,12 @@
+[Unit]
+Description=Check GitHub for Nogur server changes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+RandomizedDelaySec=10s
+Persistent=true
+Unit=nogur-pull-deploy.service
+
+[Install]
+WantedBy=timers.target

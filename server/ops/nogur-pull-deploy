@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly REPOSITORY_URL="https://github.com/WickTheThird/Nogur.git"
+readonly BRANCH="main"
+readonly DEPLOY_ROOT="/home/nogur/nogur-deploy"
+readonly REPOSITORY_DIR="${DEPLOY_ROOT}/repository"
+readonly STATE_FILE="${DEPLOY_ROOT}/deployed-server-tree"
+readonly COMMIT_FILE="${DEPLOY_ROOT}/deployed-commit"
+readonly LOCK_FILE="${DEPLOY_ROOT}/deploy.lock"
+readonly ENV_FILE="/home/nogur/nogur-server/.env.production"
+readonly WORKFLOW_RUNS_URL="https://api.github.com/repos/WickTheThird/Nogur/actions/workflows/server-checks.yml/runs?branch=main&per_page=20"
+
+mkdir -p "${DEPLOY_ROOT}"
+exec 9>"${LOCK_FILE}"
+flock -n 9 || exit 0
+
+if [ ! -d "${REPOSITORY_DIR}/.git" ]; then
+  git clone --filter=blob:none --no-checkout "${REPOSITORY_URL}" "${REPOSITORY_DIR}"
+fi
+
+git -C "${REPOSITORY_DIR}" remote set-url origin "${REPOSITORY_URL}"
+git -C "${REPOSITORY_DIR}" fetch --quiet --prune origin "${BRANCH}"
+
+# Select the newest commit that actually changed server/. A newer docs-only
+# commit will not hide the successful workflow run for the server commit.
+candidate_commit="$(git -C "${REPOSITORY_DIR}" log -1 --format=%H "origin/${BRANCH}" -- server)"
+candidate_tree="$(git -C "${REPOSITORY_DIR}" rev-parse "${candidate_commit}:server")"
+deployed_tree="$(cat "${STATE_FILE}" 2>/dev/null || true)"
+
+if [ "${candidate_tree}" = "${deployed_tree}" ]; then
+  exit 0
+fi
+
+if [ ! -f "${ENV_FILE}" ]; then
+  echo "Missing production environment file: ${ENV_FILE}" >&2
+  exit 1
+fi
+
+workflow_state="$(
+  curl --fail --silent --show-error \
+    --header 'Accept: application/vnd.github+json' \
+    --header 'X-GitHub-Api-Version: 2022-11-28' \
+    "${WORKFLOW_RUNS_URL}" |
+    jq -r --arg commit "${candidate_commit}" '
+      [.workflow_runs[] | select(.head_sha == $commit)][0]
+      | if . == null then "missing"
+        elif .status != "completed" then .status
+        elif .conclusion == "success" then "success"
+        else "failed:" + (.conclusion // "unknown")
+        end
+    '
+)"
+
+if [ "${workflow_state}" != "success" ]; then
+  echo "Server commit ${candidate_commit} is not deployable: GitHub checks are ${workflow_state}"
+  exit 0
+fi
+
+echo "Deploying server tree ${candidate_tree} from commit ${candidate_commit}"
+git -C "${REPOSITORY_DIR}" checkout --quiet --detach --force "${candidate_commit}"
+
+readonly SERVER_DIR="${REPOSITORY_DIR}/server"
+readonly COMPOSE_FILE="${SERVER_DIR}/compose.production.yaml"
+if [ ! -f "${COMPOSE_FILE}" ]; then
+  echo "Missing production Compose file in commit ${candidate_commit}" >&2
+  exit 1
+fi
+
+compose=(
+  docker compose
+  --project-name nogur-server
+  --env-file "${ENV_FILE}"
+  --file "${COMPOSE_FILE}"
+)
+
+"${compose[@]}" up -d --build --remove-orphans
+
+healthy=false
+for _ in $(seq 1 30); do
+  if "${compose[@]}" exec -T api uv run --no-sync python -c \
+    "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)" \
+    >/dev/null 2>&1; then
+    healthy=true
+    break
+  fi
+  sleep 2
+done
+
+if [ "${healthy}" != "true" ]; then
+  echo "Deployment failed its API health check" >&2
+  "${compose[@]}" logs --tail=100 api migrate >&2
+  exit 1
+fi
+
+printf '%s\n' "${candidate_tree}" > "${STATE_FILE}"
+printf '%s\n' "${candidate_commit}" > "${COMMIT_FILE}"
+echo "Deployment healthy at commit ${candidate_commit}"

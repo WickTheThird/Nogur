@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Run with sudo: sudo bash $0" >&2
+  exit 1
+fi
+
+readonly SOURCE_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+readonly DEPLOY_ROOT="/home/nogur/nogur-deploy"
+readonly REPOSITORY_DIR="${DEPLOY_ROOT}/repository"
+readonly REPOSITORY_URL="https://github.com/WickTheThird/Nogur.git"
+
+apt-get update
+apt-get install -y curl git jq util-linux
+
+install -d -m 0700 -o nogur -g nogur "${DEPLOY_ROOT}"
+install -m 0755 "${SOURCE_DIR}/nogur-pull-deploy" /usr/local/sbin/nogur-pull-deploy
+install -m 0644 "${SOURCE_DIR}/nogur-pull-deploy.service" /etc/systemd/system/nogur-pull-deploy.service
+install -m 0644 "${SOURCE_DIR}/nogur-pull-deploy.timer" /etc/systemd/system/nogur-pull-deploy.timer
+
+if [ ! -d "${REPOSITORY_DIR}/.git" ]; then
+  runuser -u nogur -- git clone --filter=blob:none --no-checkout \
+    "${REPOSITORY_URL}" "${REPOSITORY_DIR}"
+fi
+
+runuser -u nogur -- git -C "${REPOSITORY_DIR}" remote set-url origin "${REPOSITORY_URL}"
+runuser -u nogur -- git -C "${REPOSITORY_DIR}" fetch --quiet --prune origin main
+
+# Treat the currently published server tree as the baseline. The timer will
+# deploy only after a future push changes that tree.
+baseline_tree="$(runuser -u nogur -- git -C "${REPOSITORY_DIR}" rev-parse origin/main:server)"
+printf '%s\n' "${baseline_tree}" > "${DEPLOY_ROOT}/deployed-server-tree"
+chown nogur:nogur "${DEPLOY_ROOT}/deployed-server-tree"
+chmod 0600 "${DEPLOY_ROOT}/deployed-server-tree"
+
+systemctl daemon-reload
+systemctl enable --now nogur-pull-deploy.timer
+systemctl --no-pager --full status nogur-pull-deploy.timer
+
+echo
+echo "Nogur pull deployment timer is installed. It checks origin/main every two minutes and deploys server changes only after GitHub checks pass."
