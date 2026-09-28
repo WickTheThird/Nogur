@@ -7,61 +7,91 @@
 
 import SwiftUI
 
+enum SidebarDestination: String, Hashable, Identifiable {
+  case thisMac
+  case profile
+  case settings
+
+  var id: Self {
+    self
+  }
+}
+
 struct ContentView: View {
-    var body: some View {
-        NavigationSplitView {
-            sidebar
-        } detail: {
-            mainContent
-        }
-        .frame(
-            minWidth: 700,
-            minHeight: 500
-        )
+  @EnvironmentObject private var authViewModel: AuthViewModel
+  @State private var selection: SidebarDestination? = .thisMac
+
+  var body: some View {
+    NavigationSplitView {
+      sidebar
+    } detail: {
+      selectedPage
     }
-    
-    private var sidebar: some View {
-        List {
-            Section("Devices") {
-                Label("My Mac", systemImage: "laptopcomputer")
-            }
-            
-            Section("Account") {
-                Label("Profile", systemImage: "person.circle")
-                Label("Settings", systemImage: "gear")
-            }
+    .frame(
+      minWidth: 700,
+      minHeight: 500
+    )
+    .toolbar {
+      ToolbarItem {
+        Button {
+          authViewModel.signOut()
+        } label: {
+          Label(
+            "Sign Out",
+            systemImage: "rectangle.portrait.and.arrow.right"
+          )
         }
-        .navigationSplitViewColumnWidth(
-            min: 180,
-            ideal: 220,
-            max: 280
-        )
+        .help("Sign out of Nogur")
+      }
     }
-    
-    private var mainContent: some View {
-        VStack {
-            Spacer()
-            
-            Image(systemName: "display")
-                .font(.system(size: 60))
-                .foregroundColor(.secondary)
-            
-            Text("No device selected")
-                .font(.title2)
-                .fontWeight(.semibold)
-            
-            Text("Select a devoce from the sidebar")
-                .foregroundStyle(.secondary)
-            
-            Spacer()
-        }
-        .frame(
-            maxWidth: .infinity,
-            maxHeight: .infinity
-        )
+  }
+
+  private var sidebar: some View {
+    List(selection: $selection) {
+      Section("Devices") {
+        Label("This Mac", systemImage: "laptopcomputer")
+          .tag(SidebarDestination.thisMac)
+      }
+
+      Section("Account") {
+        Label("Profile", systemImage: "person.crop.circle")
+          .tag(SidebarDestination.profile)
+
+        Label("Settings", systemImage: "gear")
+          .tag(SidebarDestination.settings)
+      }
     }
+    .navigationTitle("Nogur")
+    .navigationSplitViewColumnWidth(
+      min: 180,
+      ideal: 220,
+      max: 280
+    )
+  }
+
+  @ViewBuilder
+  private var selectedPage: some View {
+    switch selection {
+    case .thisMac:
+      DeviceOverviewView()
+
+    case .profile:
+      ProfileView()
+
+    case .settings:
+      SettingsView()
+
+    case nil:
+      ContentUnavailableView(
+        "Choose a Section",
+        systemImage: "sidebar.left",
+        description: Text("Select an item from the sidebar.")
+      )
+    }
+  }
 }
 
 #Preview {
-    ContentView()
+  ContentView()
+    .environmentObject(AuthViewModel())
 }
