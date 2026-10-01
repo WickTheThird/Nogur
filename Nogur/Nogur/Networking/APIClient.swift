@@ -28,7 +28,7 @@ enum APIError: LocalizedError {
 
 struct APIClient {
   static let production = APIClient(
-    baseURL: URL(string: "https://api.bumbuindustries.com")!
+    baseURL: URL(string: "https://api.bumbuindustries.com/v1")!
   )
 
   private let baseURL: URL

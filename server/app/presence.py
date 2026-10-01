@@ -51,5 +51,8 @@ class PresenceManager:
             await socket.close(code=code)
             await self.disconnect(device_id, socket)
 
+    async def is_online(self, device_id: UUID) -> bool:
+        return await get_redis().get(self.key(device_id)) is not None
+
 
 presence_manager = PresenceManager()

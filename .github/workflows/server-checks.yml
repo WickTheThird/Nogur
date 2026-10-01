@@ -48,3 +48,41 @@ jobs:
 
       - name: Validate production image
         run: docker build --tag nogur-server:${{ github.sha }} .
+
+      - name: Validate migration on API startup
+        run: |
+          docker compose up -d --build api
+          healthy=false
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/v1/health >/dev/null; then
+              healthy=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "${healthy}" != "true" ]; then
+            docker compose logs api postgres redis
+            exit 1
+          fi
+          docker compose exec -T api uv run --no-sync alembic current | grep -F "(head)"
+
+      - name: Validate migration no-op on restart
+        run: |
+          docker compose restart api
+          healthy=false
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/v1/health >/dev/null; then
+              healthy=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "${healthy}" != "true" ]; then
+            docker compose logs api
+            exit 1
+          fi
+          docker compose exec -T api uv run --no-sync alembic current | grep -F "(head)"
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker compose logs api postgres redis

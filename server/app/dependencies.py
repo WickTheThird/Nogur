@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.models import Device, User
-from app.security import InvalidTokenError, decode_token
+from app.security import InvalidTokenError, decode_device_token, decode_token
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -41,4 +41,20 @@ async def get_current_device(
     device = await db.get(Device, device_id)
     if device is None or device.user_id != user.id or device.revoked_at is not None:
         raise HTTPException(status_code=403, detail="Unknown or revoked device")
+    return device
+
+
+async def get_verified_current_device(
+    device: Annotated[Device, Depends(get_current_device)],
+    user: Annotated[User, Depends(get_current_user)],
+    device_token: Annotated[str | None, Header(alias="X-Device-Token")] = None,
+) -> Device:
+    if device.verified_at is None or device_token is None:
+        raise HTTPException(status_code=403, detail="Device is not verified")
+    try:
+        payload = decode_device_token(device_token)
+    except InvalidTokenError:
+        raise HTTPException(status_code=403, detail="Invalid device token") from None
+    if payload.sub != user.id or payload.device_id != device.id:
+        raise HTTPException(status_code=403, detail="Device token does not match")
     return device

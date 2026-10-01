@@ -74,12 +74,15 @@ compose=(
   --file "${COMPOSE_FILE}"
 )
 
-"${compose[@]}" up -d --build --remove-orphans
+"${compose[@]}" build api migrate
+"${compose[@]}" up -d postgres redis
+"${compose[@]}" run --rm migrate
+"${compose[@]}" up -d --no-deps --remove-orphans api cloudflared
 
 healthy=false
 for _ in $(seq 1 30); do
   if "${compose[@]}" exec -T api uv run --no-sync python -c \
-    "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)" \
+    "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health', timeout=3)" \
     >/dev/null 2>&1; then
     healthy=true
     break

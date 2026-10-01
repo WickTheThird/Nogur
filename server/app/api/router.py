@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from app.api.routes import auth, devices, health, sessions, websocket
+from app.api.routes import auth, devices, health, realtime, sessions, websocket
 from app.dependencies import get_current_user
 
 api_router = APIRouter()
@@ -12,6 +12,7 @@ api_router.include_router(health.router)
 # dependency within the request.
 protected_router = APIRouter(dependencies=[Depends(get_current_user)])
 protected_router.include_router(devices.router)
+protected_router.include_router(realtime.router)
 protected_router.include_router(sessions.router)
 api_router.include_router(protected_router)
 
