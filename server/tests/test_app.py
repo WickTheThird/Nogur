@@ -102,6 +102,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_redis] = lambda: fake_redis
     monkeypatch.setattr("app.presence.get_redis", lambda: fake_redis)
+    monkeypatch.setattr("app.device_identity.get_redis", lambda: fake_redis)
     monkeypatch.setattr("app.realtime.get_redis", lambda: fake_redis)
     monkeypatch.setattr("app.rate_limit.get_redis", lambda: fake_redis)
     monkeypatch.setattr("app.api.routes.websocket.get_redis", lambda: fake_redis)
