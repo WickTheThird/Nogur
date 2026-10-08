@@ -3,7 +3,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +16,7 @@ from app.device_identity import (
     validate_public_key,
     verify_device_challenge,
 )
-from app.models import Device, User
+from app.models import Device, RemoteSession, User
 from app.presence import presence_manager
 from app.rate_limit import enforce_rate_limit
 from app.realtime import make_event, publish_device_event
@@ -28,6 +28,7 @@ from app.schemas import (
     DeviceVerifyRequest,
 )
 from app.security import create_device_token
+from app.session_audit import record_session_event
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
@@ -161,9 +162,42 @@ async def revoke_device(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     device = await owned_device(device_id, user, db)
+    ended_sessions: list[RemoteSession] = []
     if device.revoked_at is None:
-        device.revoked_at = datetime.now(UTC)
+        now = datetime.now(UTC)
+        device.revoked_at = now
+        result = await db.scalars(
+            select(RemoteSession).where(
+                RemoteSession.user_id == user.id,
+                or_(
+                    RemoteSession.source_device_id == device.id,
+                    RemoteSession.target_device_id == device.id,
+                ),
+                RemoteSession.status.in_(
+                    {"pending", "accepted", "connecting", "active"}
+                ),
+            )
+        )
+        ended_sessions = list(result)
+        for remote_session in ended_sessions:
+            remote_session.status = "ended"
+            remote_session.ended_at = now
+            remote_session.end_reason = "device_revoked"
+            record_session_event(
+                db,
+                remote_session,
+                "session.ended",
+                payload={"reason": "device_revoked"},
+            )
         await db.commit()
+    for remote_session in ended_sessions:
+        event = make_event(
+            "session.ended",
+            session_id=remote_session.id,
+            payload={"reason": "device_revoked"},
+        )
+        await publish_device_event(remote_session.source_device_id, event)
+        await publish_device_event(remote_session.target_device_id, event)
     await publish_device_event(
         device.id,
         make_event(

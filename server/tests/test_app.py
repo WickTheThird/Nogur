@@ -284,6 +284,86 @@ def test_session_validation(client: TestClient) -> None:
     assert early_transport.status_code == 409
 
 
+def test_unverified_targets_are_rejected_and_revocation_ends_sessions(
+    client: TestClient,
+) -> None:
+    tokens = register_user(client)
+    access_token = str(tokens["access_token"])
+    source = register_device(client, access_token, "Controller")
+
+    unverified_key = Ed25519PrivateKey.generate().public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    unverified = client.post(
+        f"{API}/devices/register",
+        headers=authorization(access_token),
+        json={
+            "name": "Unverified",
+            "platform": "macos",
+            "public_key": base64.b64encode(unverified_key).decode(),
+        },
+    )
+    assert unverified.status_code == 201
+    rejected_target = client.post(
+        f"{API}/sessions",
+        headers=authorization(
+            access_token,
+            str(source["id"]),
+            str(source["device_token"]),
+        ),
+        json={
+            "target_device_id": unverified.json()["id"],
+            "requested_capabilities": ["screen.view"],
+        },
+    )
+    assert rejected_target.status_code == 404
+
+    target = register_device(client, access_token, "Target")
+    created = client.post(
+        f"{API}/sessions",
+        headers=authorization(
+            access_token,
+            str(source["id"]),
+            str(source["device_token"]),
+        ),
+        json={
+            "target_device_id": target["id"],
+            "requested_capabilities": ["screen.view", "input.pointer"],
+        },
+    )
+    assert created.status_code == 201
+    session_id = created.json()["id"]
+    accepted = client.post(
+        f"{API}/sessions/{session_id}/accept",
+        headers=authorization(
+            access_token,
+            str(target["id"]),
+            str(target["device_token"]),
+        ),
+        json={"approved_capabilities": ["screen.view"]},
+    )
+    assert accepted.status_code == 200
+
+    revoked = client.delete(
+        f"{API}/devices/{target['id']}",
+        headers=authorization(access_token),
+    )
+    assert revoked.status_code == 204
+
+    ended = client.get(
+        f"{API}/sessions/{session_id}",
+        headers=authorization(
+            access_token,
+            str(source["id"]),
+            str(source["device_token"]),
+        ),
+    )
+    assert ended.status_code == 200
+    assert ended.json()["status"] == "ended"
+    assert ended.json()["end_reason"] == "device_revoked"
+
+
 def test_auth_sessions_transport_and_websocket_signaling(
     client: TestClient,
 ) -> None:

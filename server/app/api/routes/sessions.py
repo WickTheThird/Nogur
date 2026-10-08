@@ -88,7 +88,12 @@ async def create_session(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> RemoteSession:
     target = await db.get(Device, body.target_device_id)
-    if target is None or target.user_id != user.id or target.revoked_at is not None:
+    if (
+        target is None
+        or target.user_id != user.id
+        or target.revoked_at is not None
+        or target.verified_at is None
+    ):
         raise HTTPException(status_code=404, detail="Target device not found")
     if source.id == target.id:
         raise HTTPException(status_code=422, detail="Source and target must differ")
