@@ -67,7 +67,7 @@ final class WebRTCManager: NSObject, ObservableObject {
     isSource: Bool,
     signal: @escaping SignalSender
   ) async throws {
-    close()
+    await close()
     self.session = session
     self.isSource = isSource
     self.signal = signal
@@ -169,9 +169,9 @@ final class WebRTCManager: NSObject, ObservableObject {
     }
   }
 
-  func close() {
+  func close() async {
     screenCapture.frameHandler = nil
-    Task { await screenCapture.stop() }
+    await screenCapture.stop()
     inputController.end()
     reliableChannel?.close()
     pointerChannel?.close()

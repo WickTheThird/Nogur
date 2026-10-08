@@ -126,7 +126,7 @@ final class AppCoordinator: ObservableObject {
       Task { await realtime.stop() }
     }
     realtime = nil
-    webRTC.close()
+    Task { await webRTC.close() }
     preparedSessionID = nil
     preparingSessionID = nil
     pendingSignals.removeAll()
@@ -224,7 +224,7 @@ final class AppCoordinator: ObservableObject {
         requiresDevice: true
       )
       upsert(rejected)
-      webRTC.close()
+      await webRTC.close()
       preparedSessionID = nil
       preparingSessionID = nil
       pendingSignals.remove(for: session.id)
@@ -243,7 +243,7 @@ final class AppCoordinator: ObservableObject {
         requiresDevice: true
       )
       upsert(ended)
-      webRTC.close()
+      await webRTC.close()
       preparedSessionID = nil
       preparingSessionID = nil
       pendingSignals.remove(for: session.id)
@@ -312,7 +312,7 @@ final class AppCoordinator: ObservableObject {
   private func synchronizeWebRTC() async {
     guard let active = currentSession else {
       if preparedSessionID != nil {
-        webRTC.close()
+        await webRTC.close()
         preparedSessionID = nil
         preparingSessionID = nil
       }
@@ -346,7 +346,7 @@ final class AppCoordinator: ObservableObject {
     } catch {
       preparingSessionID = nil
       preparedSessionID = nil
-      webRTC.close()
+      await webRTC.close()
       errorMessage = error.localizedDescription
       if let realtime {
         try? await realtime.send(SignalingEnvelope(
@@ -386,7 +386,7 @@ final class AppCoordinator: ObservableObject {
   private func handleCurrentDeviceRevoked() async {
     if let realtime { await realtime.stop() }
     realtime = nil
-    webRTC.close()
+    await webRTC.close()
     preparedSessionID = nil
     preparingSessionID = nil
     pendingSignals.removeAll()
