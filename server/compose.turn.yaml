@@ -1,0 +1,25 @@
+services:
+  coturn:
+    image: ghcr.io/coturn/coturn:4.18.0-r0
+    restart: unless-stopped
+    command:
+      - --config=/etc/coturn/turnserver.conf
+      - --external-ip=${TURN_EXTERNAL_IP:?Set TURN_EXTERNAL_IP}
+      - --static-auth-secret=${NOGUR_TURN_SHARED_SECRET:?Set NOGUR_TURN_SHARED_SECRET}
+      - --cert=/certs/fullchain.pem
+      - --pkey=/certs/privkey.pem
+    volumes:
+      - ./ops/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - ${TURN_CERT_DIRECTORY:?Set TURN_CERT_DIRECTORY}:/certs:ro
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "5349:5349/udp"
+      - "5349:5349/tcp"
+      - "49160-49259:49160-49259/udp"
+      - "127.0.0.1:9641:9641/tcp"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /var/tmp
