@@ -63,7 +63,8 @@ final class ScreenCaptureService: NSObject, ObservableObject, SCStreamOutput, SC
 
   @discardableResult
   func requestPermission() -> Bool {
-    CGRequestScreenCaptureAccess()
+    if hasPermission { return true }
+    return CGRequestScreenCaptureAccess()
   }
 
   @MainActor

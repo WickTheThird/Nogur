@@ -412,7 +412,7 @@ private struct IncomingSessionSheet: View {
         }
       }
 
-      if requiresAccessibility, !accessibilityGranted {
+      if requiresAccessibility, !hasAccessibilityPermission {
         Label(
           "Allow Accessibility before accepting remote control.",
           systemImage: "exclamationmark.triangle.fill"
@@ -436,7 +436,7 @@ private struct IncomingSessionSheet: View {
         .disabled(
           selected.isEmpty
             || (selected.contains(.screenView) && !screenCapture.hasPermission)
-            || (requiresAccessibility && !accessibilityGranted)
+            || (requiresAccessibility && !hasAccessibilityPermission)
         )
       }
     }
@@ -454,6 +454,10 @@ private struct IncomingSessionSheet: View {
 
   private var requiresAccessibility: Bool {
     !selected.isDisjoint(with: [.inputPointer, .inputKeyboard, .inputScroll])
+  }
+
+  private var hasAccessibilityPermission: Bool {
+    accessibilityGranted || coordinator.accessibilityAllowed
   }
 }
 

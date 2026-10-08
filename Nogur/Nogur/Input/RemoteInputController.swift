@@ -87,6 +87,7 @@ final class RemoteInputController: @unchecked Sendable {
 
   @discardableResult
   func requestAccessibilityPermission() -> Bool {
+    if accessibilityAllowed { return true }
     let options = [
       kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
     ] as CFDictionary
