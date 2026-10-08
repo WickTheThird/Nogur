@@ -10,6 +10,7 @@ import SwiftUI
 @main
 struct NogurApp: App {
   @StateObject private var authViewModel = AuthViewModel()
+  @StateObject private var coordinator = AppCoordinator()
 
   var body: some Scene {
     WindowGroup {
@@ -17,6 +18,9 @@ struct NogurApp: App {
         if authViewModel.isAuthenticated {
           ContentView()
             .environmentObject(authViewModel)
+            .environmentObject(coordinator)
+            .environmentObject(coordinator.webRTC)
+            .environmentObject(coordinator.screenCapture)
         } else {
           AuthView(viewModel: authViewModel)
         }

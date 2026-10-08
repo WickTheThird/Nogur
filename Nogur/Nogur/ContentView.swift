@@ -19,6 +19,7 @@ enum SidebarDestination: String, Hashable, Identifiable {
 
 struct ContentView: View {
   @EnvironmentObject private var authViewModel: AuthViewModel
+  @EnvironmentObject private var coordinator: AppCoordinator
   @State private var selection: SidebarDestination? = .thisMac
 
   var body: some View {
@@ -32,8 +33,20 @@ struct ContentView: View {
       minHeight: 500
     )
     .toolbar {
+      if coordinator.hasActiveControl {
+        ToolbarItem(placement: .principal) {
+          Label("Remote control active", systemImage: "record.circle.fill")
+            .font(.callout.weight(.semibold))
+            .foregroundStyle(.red)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color.red.opacity(0.11), in: Capsule())
+            .accessibilityIdentifier("session.controlActive")
+        }
+      }
       ToolbarItem {
         Button {
+          coordinator.stop()
           authViewModel.signOut()
         } label: {
           Label(
@@ -44,12 +57,18 @@ struct ContentView: View {
         .help("Sign out of Nogur")
       }
     }
+    .task {
+      coordinator.start()
+    }
+    .onDisappear {
+      coordinator.stop()
+    }
   }
 
   private var sidebar: some View {
     List(selection: $selection) {
       Section("Devices") {
-        Label("This Mac", systemImage: "laptopcomputer")
+        Label("Devices", systemImage: "laptopcomputer")
           .tag(SidebarDestination.thisMac)
       }
 
@@ -92,6 +111,9 @@ struct ContentView: View {
 }
 
 #Preview {
+  let coordinator = AppCoordinator()
   ContentView()
     .environmentObject(AuthViewModel())
+    .environmentObject(coordinator)
+    .environmentObject(coordinator.webRTC)
 }

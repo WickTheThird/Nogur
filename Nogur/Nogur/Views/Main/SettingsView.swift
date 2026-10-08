@@ -8,6 +8,8 @@
 import SwiftUI
 
 struct SettingsView: View {
+  @EnvironmentObject private var coordinator: AppCoordinator
+  @EnvironmentObject private var screenCapture: ScreenCaptureService
   private var versionText: String {
     let version =
       Bundle.main.object(
@@ -56,6 +58,42 @@ struct SettingsView: View {
 
         GlassPanel {
           VStack(alignment: .leading, spacing: 18) {
+            Text("Remote access permissions")
+              .font(.headline)
+
+            permissionRow(
+              title: "Screen Recording",
+              detail: "Required only when this Mac shares a display.",
+              granted: screenCapture.hasPermission,
+              action: {
+                _ = screenCapture.requestPermission()
+                Task { await screenCapture.refreshDisplays() }
+              }
+            )
+
+            Divider()
+
+            permissionRow(
+              title: "Accessibility",
+              detail: "Required only when you approve remote keyboard or pointer control.",
+              granted: coordinator.accessibilityAllowed,
+              action: { _ = coordinator.requestAccessibilityPermission() }
+            )
+
+            if !screenCapture.displays.isEmpty {
+              Divider()
+              Picker("Display to share", selection: $screenCapture.selectedDisplayID) {
+                ForEach(screenCapture.displays) { display in
+                  Text("\(display.name) · \(display.width) × \(display.height)")
+                    .tag(Optional(display.id))
+                }
+              }
+            }
+          }
+        }
+
+        GlassPanel {
+          VStack(alignment: .leading, spacing: 18) {
             Text("Application")
               .font(.headline)
 
@@ -79,10 +117,36 @@ struct SettingsView: View {
       }
     }
     .navigationTitle("Settings")
+    .task {
+      await screenCapture.refreshDisplays()
+    }
+  }
+
+  private func permissionRow(
+    title: String,
+    detail: String,
+    granted: Bool,
+    action: @escaping () -> Void
+  ) -> some View {
+    HStack(spacing: 14) {
+      Image(systemName: granted ? "checkmark.circle.fill" : "circle.dashed")
+        .foregroundStyle(granted ? .green : .orange)
+      VStack(alignment: .leading, spacing: 3) {
+        Text(title).font(.body.weight(.medium))
+        Text(detail).font(.caption).foregroundStyle(.secondary)
+      }
+      Spacer()
+      if !granted {
+        Button("Allow", action: action)
+      }
+    }
   }
 }
 
 #Preview {
+  let coordinator = AppCoordinator()
   SettingsView()
+    .environmentObject(coordinator)
+    .environmentObject(coordinator.screenCapture)
     .frame(width: 900, height: 650)
 }

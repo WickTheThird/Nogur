@@ -80,6 +80,7 @@ final class AuthViewModel: ObservableObject {
 
   private let apiClient: APIClient
   private let tokenStore: TokenStore
+  private var cancellables: Set<AnyCancellable> = []
 
   init(
     apiClient: APIClient? = nil,
@@ -92,6 +93,13 @@ final class AuthViewModel: ObservableObject {
     self.tokenStore = resolvedTokenStore
     isAuthenticated = resolvedTokenStore.hasSession
     currentEmail = resolvedTokenStore.emailAddress
+
+    NotificationCenter.default.publisher(for: .nogurAuthenticationExpired)
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        self?.completeSignOut(clearTokens: false)
+      }
+      .store(in: &cancellables)
   }
 
   var canSubmit: Bool {
@@ -166,7 +174,13 @@ final class AuthViewModel: ObservableObject {
   }
 
   func signOut() {
-    tokenStore.clear()
+    completeSignOut(clearTokens: true)
+  }
+
+  private func completeSignOut(clearTokens: Bool) {
+    if clearTokens {
+      tokenStore.clear()
+    }
 
     email = ""
     password = ""
@@ -174,6 +188,7 @@ final class AuthViewModel: ObservableObject {
     errorMessage = nil
     currentEmail = nil
     isAuthenticated = false
+    NotificationCenter.default.post(name: .nogurDidSignOut, object: nil)
   }
 
   private var validationError: String? {
@@ -200,4 +215,10 @@ final class AuthViewModel: ObservableObject {
 
     return nil
   }
+}
+
+extension Notification.Name {
+  static let nogurDidSignOut = Notification.Name(
+    "com.filipbumbu.Nogur.didSignOut"
+  )
 }

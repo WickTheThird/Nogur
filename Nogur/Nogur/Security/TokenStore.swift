@@ -7,7 +7,17 @@
 
 import Foundation
 
-final class TokenStore {
+protocol TokenStoring: AnyObject, Sendable {
+  var accessToken: String? { get }
+  var refreshToken: String? { get }
+  var emailAddress: String? { get }
+  var hasSession: Bool { get }
+
+  func save(_ tokens: TokenPair, emailAddress: String?) throws
+  func clear()
+}
+
+final class TokenStore: TokenStoring, @unchecked Sendable {
   static let shared = TokenStore()
 
   private enum Account {
@@ -16,24 +26,26 @@ final class TokenStore {
     static let emailAddress = "email-address"
   }
 
-  private let keychain: KeychainStore
+  private let keychain: any SecureStoring
+  private let lock = NSLock()
 
   init(
-    service: String = Bundle.main.bundleIdentifier ?? "com.filipbumbu.Nogur"
+    service: String = Bundle.main.bundleIdentifier ?? "com.filipbumbu.Nogur",
+    keychain: (any SecureStoring)? = nil
   ) {
-    keychain = KeychainStore(service: service)
+    self.keychain = keychain ?? KeychainStore(service: service)
   }
 
   var accessToken: String? {
-    try? keychain.read(account: Account.accessToken)
+    read(Account.accessToken)
   }
 
   var refreshToken: String? {
-    try? keychain.read(account: Account.refreshToken)
+    read(Account.refreshToken)
   }
 
   var emailAddress: String? {
-    try? keychain.read(account: Account.emailAddress)
+    read(Account.emailAddress)
   }
 
   var hasSession: Bool {
@@ -42,8 +54,11 @@ final class TokenStore {
 
   func save(
     _ tokens: TokenPair,
-    emailAddress: String
+    emailAddress: String? = nil
   ) throws {
+    lock.lock()
+    defer { lock.unlock() }
+
     do {
       try keychain.save(
         tokens.accessToken,
@@ -55,17 +70,31 @@ final class TokenStore {
         account: Account.refreshToken
       )
 
-      try keychain.save(
-        emailAddress,
-        account: Account.emailAddress
-      )
+      if let emailAddress {
+        try keychain.save(
+          emailAddress,
+          account: Account.emailAddress
+        )
+      }
     } catch {
-      clear()
+      clearWithoutLock()
       throw error
     }
   }
 
   func clear() {
+    lock.lock()
+    defer { lock.unlock() }
+    clearWithoutLock()
+  }
+
+  private func read(_ account: String) -> String? {
+    lock.lock()
+    defer { lock.unlock() }
+    return try? keychain.read(account: account)
+  }
+
+  private func clearWithoutLock() {
     try? keychain.delete(account: Account.accessToken)
     try? keychain.delete(account: Account.refreshToken)
     try? keychain.delete(account: Account.emailAddress)
