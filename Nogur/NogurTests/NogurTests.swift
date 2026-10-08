@@ -117,6 +117,19 @@ struct NogurTests {
   }
 
   @Test
+  func pendingSignalsPreserveArrivalOrder() {
+    let sessionID = UUID()
+    let offer = SignalingEnvelope(type: "webrtc.offer", sessionID: sessionID)
+    let candidate = SignalingEnvelope(type: "webrtc.ice_candidate", sessionID: sessionID)
+    var buffer = PendingSignalBuffer()
+    buffer.append(offer, for: sessionID)
+    buffer.append(candidate, for: sessionID)
+
+    #expect(buffer.drain(for: sessionID) == [offer, candidate])
+    #expect(buffer.drain(for: sessionID).isEmpty)
+  }
+
+  @Test
   func reconnectBackoffIsExponentialAndCapped() {
     let backoff = ReconnectBackoff(maximum: 30)
     #expect(backoff.delay(for: 1) == 1)

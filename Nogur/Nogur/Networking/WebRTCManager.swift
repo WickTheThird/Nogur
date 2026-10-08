@@ -45,6 +45,7 @@ final class WebRTCManager: NSObject, ObservableObject {
   private var signal: SignalSender?
   private var videoSource: RTCVideoSource?
   private var videoCapturer: RTCVideoCapturer?
+  private var pendingRemoteCandidates: [RTCIceCandidate] = []
 
   init(
     screenCapture: ScreenCaptureService,
@@ -112,6 +113,7 @@ final class WebRTCManager: NSObject, ObservableObject {
     case "webrtc.offer":
       guard !isSource, let sdp = envelope.payload["sdp"]?.stringValue else { return }
       try await setRemote(RTCSessionDescription(type: .offer, sdp: sdp), on: peer)
+      try await flushRemoteCandidates(on: peer)
       let answer = try await createAnswer(on: peer)
       try await setLocal(answer, on: peer)
       try await signal?(SignalingEnvelope(
@@ -122,14 +124,21 @@ final class WebRTCManager: NSObject, ObservableObject {
     case "webrtc.answer":
       guard isSource, let sdp = envelope.payload["sdp"]?.stringValue else { return }
       try await setRemote(RTCSessionDescription(type: .answer, sdp: sdp), on: peer)
+      try await flushRemoteCandidates(on: peer)
     case "webrtc.ice_candidate":
       guard let candidate = envelope.payload["candidate"]?.stringValue else { return }
       let mid = envelope.payload["sdp_mid"]?.stringValue
       let index = Int32(envelope.payload["sdp_mline_index"]?.numberValue ?? 0)
-      try await addCandidate(
-        RTCIceCandidate(sdp: candidate, sdpMLineIndex: index, sdpMid: mid),
-        on: peer
+      let iceCandidate = RTCIceCandidate(
+        sdp: candidate,
+        sdpMLineIndex: index,
+        sdpMid: mid
       )
+      if peer.remoteDescription == nil {
+        pendingRemoteCandidates.append(iceCandidate)
+      } else {
+        try await addCandidate(iceCandidate, on: peer)
+      }
     default:
       break
     }
@@ -174,6 +183,7 @@ final class WebRTCManager: NSObject, ObservableObject {
     remoteVideoTrack = nil
     videoCapturer = nil
     videoSource = nil
+    pendingRemoteCandidates.removeAll()
     session = nil
     signal = nil
     state = .closed
@@ -289,6 +299,14 @@ final class WebRTCManager: NSObject, ObservableObject {
         if let error { continuation.resume(throwing: error) }
         else { continuation.resume() }
       }
+    }
+  }
+
+  private func flushRemoteCandidates(on peer: RTCPeerConnection) async throws {
+    let candidates = pendingRemoteCandidates
+    pendingRemoteCandidates.removeAll()
+    for candidate in candidates {
+      try await addCandidate(candidate, on: peer)
     }
   }
 }

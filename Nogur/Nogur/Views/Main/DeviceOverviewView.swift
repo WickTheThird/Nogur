@@ -25,7 +25,14 @@ struct DeviceOverviewView: View {
           identityState
         }
 
-        if let session = coordinator.currentSession {
+        if let message = coordinator.errorMessage {
+          GlassPanel {
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+              .foregroundStyle(.orange)
+          }
+        }
+
+        if let session = coordinator.displayedSession {
           SessionStatusPanel(
             session: session,
             peerName: coordinator.deviceName(
@@ -33,9 +40,9 @@ struct DeviceOverviewView: View {
                 ? session.targetDeviceID
                 : session.sourceDeviceID
             ),
-            endAction: {
-              Task { await coordinator.endCurrentSession() }
-            }
+            endAction: session.status.isTerminal
+              ? nil
+              : { Task { await coordinator.endCurrentSession() } }
           )
         }
 
@@ -284,7 +291,7 @@ private struct DeviceCard: View {
 private struct SessionStatusPanel: View {
   let session: RemoteSessionRecord
   let peerName: String
-  let endAction: () -> Void
+  let endAction: (() -> Void)?
 
   var body: some View {
     GlassPanel {
@@ -303,8 +310,10 @@ private struct SessionStatusPanel: View {
             .foregroundStyle(.secondary)
         }
         Spacer()
-        Button("End Session", role: .destructive, action: endAction)
-          .buttonStyle(.bordered)
+        if let endAction {
+          Button("End Session", role: .destructive, action: endAction)
+            .buttonStyle(.bordered)
+        }
       }
     }
   }
@@ -344,11 +353,15 @@ private struct NewSessionSheet: View {
 }
 
 private struct IncomingSessionSheet: View {
+  @Environment(\.scenePhase) private var scenePhase
+  @EnvironmentObject private var coordinator: AppCoordinator
+  @EnvironmentObject private var screenCapture: ScreenCaptureService
   let session: RemoteSessionRecord
   let sourceName: String
   let accept: ([SessionCapability]) -> Void
   let reject: () -> Void
   @State private var selected: Set<SessionCapability>
+  @State private var accessibilityGranted = false
 
   init(
     session: RemoteSessionRecord,
@@ -385,6 +398,33 @@ private struct IncomingSessionSheet: View {
 
       CapabilityPicker(selected: $selected, allowed: Set(session.requestedCapabilities))
 
+      if selected.contains(.screenView), !screenCapture.hasPermission {
+        Label(
+          "Allow Screen Recording before accepting screen sharing.",
+          systemImage: "exclamationmark.triangle.fill"
+        )
+        .font(.callout)
+        .foregroundStyle(.orange)
+
+        Button("Allow Screen Recording") {
+          _ = screenCapture.requestPermission()
+          Task { await screenCapture.refreshDisplays() }
+        }
+      }
+
+      if requiresAccessibility, !accessibilityGranted {
+        Label(
+          "Allow Accessibility before accepting remote control.",
+          systemImage: "exclamationmark.triangle.fill"
+        )
+        .font(.callout)
+        .foregroundStyle(.orange)
+
+        Button("Allow Accessibility") {
+          accessibilityGranted = coordinator.requestAccessibilityPermission()
+        }
+      }
+
       HStack {
         Button("Reject", role: .destructive, action: reject)
           .buttonStyle(.bordered)
@@ -393,11 +433,27 @@ private struct IncomingSessionSheet: View {
           accept(SessionCapability.allCases.filter(selected.contains))
         }
         .buttonStyle(.borderedProminent)
-        .disabled(selected.isEmpty)
+        .disabled(
+          selected.isEmpty
+            || (selected.contains(.screenView) && !screenCapture.hasPermission)
+            || (requiresAccessibility && !accessibilityGranted)
+        )
       }
     }
     .padding(26)
     .frame(width: 450)
+    .onAppear {
+      accessibilityGranted = coordinator.accessibilityAllowed
+    }
+    .onChange(of: scenePhase) { _, phase in
+      if phase == .active {
+        accessibilityGranted = coordinator.accessibilityAllowed
+      }
+    }
+  }
+
+  private var requiresAccessibility: Bool {
+    !selected.isDisjoint(with: [.inputPointer, .inputKeyboard, .inputScroll])
   }
 }
 

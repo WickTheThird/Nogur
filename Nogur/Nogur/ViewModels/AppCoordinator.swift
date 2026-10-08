@@ -32,6 +32,8 @@ final class AppCoordinator: ObservableObject {
   private var bootstrapTask: Task<Void, Never>?
   private var monitorTask: Task<Void, Never>?
   private var preparedSessionID: UUID?
+  private var preparingSessionID: UUID?
+  private var pendingSignals = PendingSignalBuffer()
 
   init(
     api: APIClient = .production,
@@ -74,6 +76,10 @@ final class AppCoordinator: ObservableObject {
       !$0.status.isTerminal
         && ($0.sourceDeviceID == currentDeviceID || $0.targetDeviceID == currentDeviceID)
     }
+  }
+
+  var displayedSession: RemoteSessionRecord? {
+    currentSession ?? sessions.first
   }
 
   var hasActiveControl: Bool {
@@ -122,6 +128,8 @@ final class AppCoordinator: ObservableObject {
     realtime = nil
     webRTC.close()
     preparedSessionID = nil
+    preparingSessionID = nil
+    pendingSignals.removeAll()
     sessions = []
   }
 
@@ -218,6 +226,8 @@ final class AppCoordinator: ObservableObject {
       upsert(rejected)
       webRTC.close()
       preparedSessionID = nil
+      preparingSessionID = nil
+      pendingSignals.remove(for: session.id)
     } catch {
       errorMessage = error.localizedDescription
     }
@@ -235,6 +245,8 @@ final class AppCoordinator: ObservableObject {
       upsert(ended)
       webRTC.close()
       preparedSessionID = nil
+      preparingSessionID = nil
+      pendingSignals.remove(for: session.id)
     } catch {
       errorMessage = error.localizedDescription
     }
@@ -287,11 +299,7 @@ final class AppCoordinator: ObservableObject {
     case "device.revoked":
       await handleCurrentDeviceRevoked()
     case "webrtc.offer", "webrtc.answer", "webrtc.ice_candidate":
-      do {
-        try await webRTC.handle(envelope)
-      } catch {
-        errorMessage = error.localizedDescription
-      }
+      await handleSignal(envelope)
     case "device.connected", "session.requested", "session.accepted",
       "session.rejected", "session.connecting", "session.active",
       "session.failed", "session.expired", "session.ended":
@@ -306,11 +314,17 @@ final class AppCoordinator: ObservableObject {
       if preparedSessionID != nil {
         webRTC.close()
         preparedSessionID = nil
+        preparingSessionID = nil
       }
       return
     }
     guard [.accepted, .connecting, .active].contains(active.status) else { return }
-    guard preparedSessionID != active.id, let currentDeviceID else { return }
+    guard
+      preparedSessionID != active.id,
+      preparingSessionID != active.id,
+      let currentDeviceID
+    else { return }
+    preparingSessionID = active.id
     do {
       let transport: SessionTransportResponse = try await api.send(
         path: "sessions/\(active.id)/transport",
@@ -318,7 +332,6 @@ final class AppCoordinator: ObservableObject {
         requiresDevice: true
       )
       guard let realtime else { throw APIError.transport("Realtime is not connected.") }
-      preparedSessionID = active.id
       try await webRTC.prepare(
         session: active,
         transport: transport,
@@ -327,8 +340,13 @@ final class AppCoordinator: ObservableObject {
           try await realtime.send(envelope)
         }
       )
+      preparingSessionID = nil
+      preparedSessionID = active.id
+      await flushSignals(for: active.id)
     } catch {
+      preparingSessionID = nil
       preparedSessionID = nil
+      webRTC.close()
       errorMessage = error.localizedDescription
       if let realtime {
         try? await realtime.send(SignalingEnvelope(
@@ -340,11 +358,38 @@ final class AppCoordinator: ObservableObject {
     }
   }
 
+  private func handleSignal(_ envelope: SignalingEnvelope) async {
+    guard let sessionID = envelope.sessionID else { return }
+    guard preparedSessionID == sessionID else {
+      pendingSignals.append(envelope, for: sessionID)
+      await synchronizeWebRTC()
+      return
+    }
+    do {
+      try await webRTC.handle(envelope)
+    } catch {
+      errorMessage = error.localizedDescription
+    }
+  }
+
+  private func flushSignals(for sessionID: UUID) async {
+    let signals = pendingSignals.drain(for: sessionID)
+    for envelope in signals {
+      do {
+        try await webRTC.handle(envelope)
+      } catch {
+        errorMessage = error.localizedDescription
+      }
+    }
+  }
+
   private func handleCurrentDeviceRevoked() async {
     if let realtime { await realtime.stop() }
     realtime = nil
     webRTC.close()
     preparedSessionID = nil
+    preparingSessionID = nil
+    pendingSignals.removeAll()
     currentDevice = currentDevice.map {
       DeviceRecord(
         id: $0.id,

@@ -100,3 +100,23 @@ struct ReconnectBackoff: Sendable {
     min(maximum, pow(2, Double(max(0, attempt - 1))))
   }
 }
+
+struct PendingSignalBuffer: Sendable {
+  private var storage: [UUID: [SignalingEnvelope]] = [:]
+
+  mutating func append(_ envelope: SignalingEnvelope, for sessionID: UUID) {
+    storage[sessionID, default: []].append(envelope)
+  }
+
+  mutating func drain(for sessionID: UUID) -> [SignalingEnvelope] {
+    storage.removeValue(forKey: sessionID) ?? []
+  }
+
+  mutating func remove(for sessionID: UUID) {
+    storage.removeValue(forKey: sessionID)
+  }
+
+  mutating func removeAll() {
+    storage.removeAll()
+  }
+}
